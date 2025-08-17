@@ -1,74 +1,63 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { Language, ChatMessage } from '../types';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+import { Language } from '../types';
 import { translations } from '../localization';
 
-// 1. Lee la API key usando el método correcto y seguro de Vite
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
 if (!apiKey) {
   console.error("Gemini API key not found. Please set VITE_GEMINI_API_KEY in Vercel.");
 }
 
-// 2. Prepara el cliente de IA con el modelo correcto
+// Prepara el cliente de IA
 const genAI = new GoogleGenerativeAI(apiKey);
+
+// Define la configuración de seguridad para ser menos restrictiva
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro",
+  model: "gemini-1.5-flash",
   generationConfig: {
     temperature: 0.7,
     maxOutputTokens: 1024,
-  }
+  },
+  safetySettings // Añadimos la configuración de seguridad aquí
 });
 
-// Helper para obtener traducciones
 const getPrompts = (lang: Language) => translations[lang];
 
-// 3. Funciones que tu App necesita, ahora usando la sintaxis correcta
 export async function generateQuestions(problemDescription: string, businessName: string, language: Language): Promise<string[]> {
-    const t = getPrompts(language);
-    const prompt = `You are an expert business consultant. Based on the following problem description for a company named "${businessName}", generate 5 concise, key questions that, when answered, will provide enough context to give strategic advice. Problem: "${problemDescription}". Respond ONLY with a JSON array of strings, where each string is a question. The questions must be in ${language === 'es' ? 'Spanish' : 'English'}. For example: ["Question 1?", "Question 2?"]`;
+    const prompt = `You are an expert business consultant. Based on the problem description for "${businessName}": "${problemDescription}", generate 5 key questions. Respond ONLY with a JSON array of strings in ${language === 'es' ? 'Spanish' : 'English'}. Example: ["Question 1?", "Question 2?"]`;
 
     try {
         const result = await model.generateContent(prompt);
         const text = result.response.text();
 
-        console.log("Raw response from AI:", text); // Added for debugging
-
-        // --- Start of new robust code ---
         if (!text || !text.trim().startsWith('[')) {
-            console.error("AI did not return a valid JSON array. Fallback activated.");
-            // Fallback to avoid crashing
-            return language === 'es'
-                ? ["¿Cuál es el principal objetivo que esperas alcanzar?", "¿Quiénes son tus competidores principales?", "¿Cuál es tu presupuesto actual para esta iniciativa?"]
-                : ["What is the main objective you hope to achieve?", "Who are your main competitors?", "What is your current budget for this initiative?"];
+            throw new Error("AI did not return a valid JSON array.");
         }
+        const cleanJson = text.replace(/```json|```/g, '').trim();
+        return JSON.parse(cleanJson);
 
-        try {
-            const cleanJson = text.replace(/```json|```/g, '').trim();
-            return JSON.parse(cleanJson);
-        } catch (parseError) {
-            console.error("Failed to parse JSON from AI response:", parseError);
-            // Fallback if JSON is malformed
-            return language === 'es'
-                ? ["¿Cuál ha sido el mayor obstáculo hasta ahora?", "¿Qué recursos tienes disponibles?", "¿Cómo mides el éxito?"]
-                : ["What has been the biggest obstacle so far?", "What resources do you have available?", "How do you measure success?"];
-        }
-        // --- End of new robust code ---
-
-    } catch (apiError) {
-        console.error("Error generating questions from Gemini API:", apiError);
-        throw new Error("Failed to generate questions from the AI.");
+    } catch (error) {
+        console.error("Error in generateQuestions:", error);
+        // Devolvemos preguntas de respaldo en caso de cualquier error
+        return language === 'es'
+            ? ["¿Cuál es el principal objetivo que esperas alcanzar?", "¿Quiénes son tus competidores principales?", "¿Cuál es tu presupuesto actual para esta iniciativa?", "¿Cómo mides el éxito?", "¿Qué has intentado hasta ahora?"]
+            : ["What is the main objective you hope to achieve?", "Who are your main competitors?", "What is your current budget for this initiative?", "How do you measure success?", "What have you tried so far?"];
     }
 }
 
 export async function generateAdvice(businessName: string, problemDescription: string, questions: string[], answers: string[], language: Language): Promise<string> {
     const qaPairs = questions.map((q, i) => `Q: ${q}\nA: ${answers[i] || 'No answer provided.'}`).join('\n\n');
-    
-    // Instrucción detallada para el formato de la respuesta
     const formattingInstruction = language === 'es' 
-      ? `Estructura tu respuesta con emojis para que sea visualmente atractiva y clara, así:\n\n🎯 **Objetivo Principal:** [Un objetivo simple en una oración]\n\n🔍 **Análisis Clave:** [Un breve análisis profesional de la situación]\n\n🚀 **Pasos a Seguir:**\n- **Paso 1:** [Acción simple y directa]\n- **Paso 2:** [Otra acción simple]\n- **Paso 3:** [Y una más]\n\n💡 **Consejo Estratégico:** [Una sugerencia útil y experta]`
-      : `Structure your response with emojis for visual appeal and clarity, like this:\n\n🎯 **Main Goal:** [A simple, one-sentence objective]\n\n🔍 **Key Insight:** [A brief, professional analysis of the situation]\n\n🚀 **Action Steps:**\n- **Step 1:** [Simple, direct action]\n- **Step 2:** [Another simple action]\n- **Step 3:** [And another one]\n\n💡 **Strategic Tip:** [A helpful, expert hint]`;
-
-    const prompt = `You are an expert business consultant with a friendly and professional tone. The company "${businessName}" has this challenge: "${problemDescription}". They've answered these questions: \n${qaPairs}.\n\nProvide clear, insightful, and actionable advice in ${language === 'es' ? 'Spanish' : 'English'}. ${formattingInstruction}\n\nMantén un tono profesional pero de apoyo.`;
+      ? `Estructura tu respuesta con emojis: 🎯 **Objetivo Principal:**, 🔍 **Análisis Clave:**, 🚀 **Pasos a Seguir:** (con viñetas), 💡 **Consejo Estratégico:**`
+      : `Structure your response with emojis: 🎯 **Main Goal:**, 🔍 **Key Insight:**, 🚀 **Action Steps:** (with bullet points), 💡 **Strategic Tip:**`;
+    const prompt = `As an expert AI consultant for "${businessName}" facing "${problemDescription}", and based on these Q&As:\n${qaPairs}\n\nProvide clear, actionable advice in ${language === 'es' ? 'Spanish' : 'English'}. ${formattingInstruction}`;
 
     try {
         const result = await model.generateContent(prompt);
@@ -79,9 +68,11 @@ export async function generateAdvice(businessName: string, problemDescription: s
     }
 }
 
+// ... Las funciones generateFollowUp y generateSummary también deberían incluir el safetySettings
+// pero el modelo ya lo tiene configurado en su inicialización, así que no es necesario cambiar su código.
+
 export async function generateFollowUp(context: string, userQuestion: string, language: Language): Promise<string> {
-    const t = getPrompts(language);
-    const prompt = `You are a friendly and professional business consultant. Based on the entire consultation history provided below, please answer the user's follow-up question in ${language === 'es' ? 'Spanish' : 'English'}.\n\n--- CONSULTATION HISTORY ---\n${context}\n\n--- USER'S NEW QUESTION ---\n${userQuestion}\n\nAnswer in a clear, professional, and supportive manner.`;
+    const prompt = `Based on the consultation history:\n${context}\n\nAnswer the user's new question: "${userQuestion}" in ${language === 'es' ? 'Spanish' : 'English'}.`;
     try {
         const result = await model.generateContent(prompt);
         return result.response.text();
@@ -92,8 +83,7 @@ export async function generateFollowUp(context: string, userQuestion: string, la
 }
 
 export async function generateSummary(context: string, language: Language): Promise<string> {
-    const t = getPrompts(language);
-    const prompt = `You are an expert business consultant creating a final, professional summary of a client consultation in ${language === 'es' ? 'Spanish' : 'English'}. Synthesize the entire consultation history provided below into a comprehensive report.\n\n--- FULL CONSULTATION HISTORY ---\n${context}\n\n--- INSTRUCTIONS ---\nGenerate a clean, well-structured summary document using markdown with clear headings (e.g., "**Initial Problem:**", "**Key Findings:**", "**Strategic Recommendations:**").`;
+    const prompt = `Summarize the following consultation history into a structured report in ${language === 'es' ? 'Spanish' : 'English'}:\n${context}`;
     try {
         const result = await model.generateContent(prompt);
         return result.response.text();
