@@ -24,19 +24,40 @@ const getPrompts = (lang: Language) => translations[lang];
 
 // 3. Funciones que tu App necesita, ahora usando la sintaxis correcta
 export async function generateQuestions(problemDescription: string, businessName: string, language: Language): Promise<string[]> {
-  const t = getPrompts(language);
-  const prompt = `You are an expert business consultant. Based on the following problem description for a company named "${businessName}", generate 3 concise, key questions that, when answered, will provide enough context to give strategic advice. Problem: "${problemDescription}". Respond ONLY with a JSON array of strings, where each string is a question. The questions must be in ${language === 'es' ? 'Spanish' : 'English'}. For example: ["Question 1?", "Question 2?"]`;
+    const t = getPrompts(language);
+    const prompt = `You are an expert business consultant. Based on the following problem description for a company named "${businessName}", generate 5 concise, key questions that, when answered, will provide enough context to give strategic advice. Problem: "${problemDescription}". Respond ONLY with a JSON array of strings, where each string is a question. The questions must be in ${language === 'es' ? 'Spanish' : 'English'}. For example: ["Question 1?", "Question 2?"]`;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    // Limpia y parsea la respuesta JSON
-    const cleanJson = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleanJson);
-  } catch (error) {
-    console.error("Error generating questions:", error);
-    throw new Error("Failed to generate questions from the AI.");
-  }
+    try {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+
+        console.log("Raw response from AI:", text); // Added for debugging
+
+        // --- Start of new robust code ---
+        if (!text || !text.trim().startsWith('[')) {
+            console.error("AI did not return a valid JSON array. Fallback activated.");
+            // Fallback to avoid crashing
+            return language === 'es'
+                ? ["¿Cuál es el principal objetivo que esperas alcanzar?", "¿Quiénes son tus competidores principales?", "¿Cuál es tu presupuesto actual para esta iniciativa?"]
+                : ["What is the main objective you hope to achieve?", "Who are your main competitors?", "What is your current budget for this initiative?"];
+        }
+
+        try {
+            const cleanJson = text.replace(/```json|```/g, '').trim();
+            return JSON.parse(cleanJson);
+        } catch (parseError) {
+            console.error("Failed to parse JSON from AI response:", parseError);
+            // Fallback if JSON is malformed
+            return language === 'es'
+                ? ["¿Cuál ha sido el mayor obstáculo hasta ahora?", "¿Qué recursos tienes disponibles?", "¿Cómo mides el éxito?"]
+                : ["What has been the biggest obstacle so far?", "What resources do you have available?", "How do you measure success?"];
+        }
+        // --- End of new robust code ---
+
+    } catch (apiError) {
+        console.error("Error generating questions from Gemini API:", apiError);
+        throw new Error("Failed to generate questions from the AI.");
+    }
 }
 
 export async function generateAdvice(businessName: string, problemDescription: string, questions: string[], answers: string[], language: Language): Promise<string> {
