@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Language, ChatMessage } from '../types';
-import { translations } from '../App'; // Asumiendo que las traducciones están en App.tsx o un archivo similar
+import { translations } from '../localization';
 
 // 1. Lee la API key usando el método correcto y seguro de Vite
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
