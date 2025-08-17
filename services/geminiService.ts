@@ -12,7 +12,7 @@ if (!apiKey) {
 // 2. Prepara el cliente de IA con el modelo correcto
 const genAI = new GoogleGenerativeAI(apiKey);
 const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
+  model: "gemini-2.5-pro",
   generationConfig: {
     temperature: 0.7,
     maxOutputTokens: 1024,
@@ -40,13 +40,17 @@ export async function generateQuestions(problemDescription: string, businessName
 }
 
 export async function generateAdvice(businessName: string, problemDescription: string, questions: string[], answers: string[], language: Language): Promise<string> {
-    const t = getPrompts(language);
     const qaPairs = questions.map((q, i) => `Q: ${q}\nA: ${answers[i] || 'No answer provided.'}`).join('\n\n');
-    const prompt = t.advice.title; // Usar prompt desde un objeto de traducciones sería ideal, pero esto funciona.
+    
+    // Instrucción detallada para el formato de la respuesta
+    const formattingInstruction = language === 'es' 
+      ? `Estructura tu respuesta con emojis para que sea visualmente atractiva y clara, así:\n\n🎯 **Objetivo Principal:** [Un objetivo simple en una oración]\n\n🔍 **Análisis Clave:** [Un breve análisis profesional de la situación]\n\n🚀 **Pasos a Seguir:**\n- **Paso 1:** [Acción simple y directa]\n- **Paso 2:** [Otra acción simple]\n- **Paso 3:** [Y una más]\n\n💡 **Consejo Estratégico:** [Una sugerencia útil y experta]`
+      : `Structure your response with emojis for visual appeal and clarity, like this:\n\n🎯 **Main Goal:** [A simple, one-sentence objective]\n\n🔍 **Key Insight:** [A brief, professional analysis of the situation]\n\n🚀 **Action Steps:**\n- **Step 1:** [Simple, direct action]\n- **Step 2:** [Another simple action]\n- **Step 3:** [And another one]\n\n💡 **Strategic Tip:** [A helpful, expert hint]`;
+
+    const prompt = `You are an expert business consultant with a friendly and professional tone. The company "${businessName}" has this challenge: "${problemDescription}". They've answered these questions: \n${qaPairs}.\n\nProvide clear, insightful, and actionable advice in ${language === 'es' ? 'Spanish' : 'English'}. ${formattingInstruction}\n\nMantén un tono profesional pero de apoyo.`;
 
     try {
-        const fullPrompt = `You are an expert business consultant with a friendly and professional tone. The company "${businessName}" has this challenge: "${problemDescription}". They've answered these questions: \n${qaPairs}.\n\nProvide clear, insightful, and actionable advice in ${language === 'es' ? 'Spanish' : 'English'}. Structure your response with markdown.`;
-        const result = await model.generateContent(fullPrompt);
+        const result = await model.generateContent(prompt);
         return result.response.text();
     } catch (error) {
         console.error("Error generating advice:", error);
